@@ -1,0 +1,63 @@
+version: '3'
+
+tasks:
+  create-cluster:
+    desc: Tworzy klaster Kind (jeśli nie istnieje)
+    cmds:
+      - if ! kind get clusters | grep -q voting-cluster; then kind create cluster --name voting-cluster; fi
+
+  create-namespace:
+    desc: Tworzy namespace voting-app (jeśli nie istnieje)
+    cmds:
+      - if ! kubectl get namespace voting-app >/dev/null 2>&1; then kubectl create namespace voting-app; fi
+
+  build-backend:
+    desc: Buduje obraz Docker dla backendu
+    cmds:
+      - docker build -t voting-backend:latest ./backend
+
+  build-frontend:
+    desc: Buduje obraz Docker dla frontendu
+    cmds:
+      - docker build -t voting-frontend:latest ./frontend
+
+  load-images:
+    desc: Wczytuje obrazy do klastra Kind
+    deps:
+      - build-backend
+      - build-frontend
+    cmds:
+      - kind load docker-image voting-backend:latest --name voting-cluster
+      - kind load docker-image voting-frontend:latest --name voting-cluster
+
+  deploy:
+    desc: Wdraża aplikację na Kubernetes w namespace voting-app
+    deps:
+      - create-namespace
+      - load-images
+    cmds:
+      - kubectl apply -f kubernetes/redis-deployment.yaml -n voting-app
+      - kubectl apply -f kubernetes/backend-deployment.yaml -n voting-app
+      - kubectl apply -f kubernetes/frontend-deployment.yaml -n voting-app
+
+  port-forward:
+    desc: Przekierowuje porty do lokalnego dostępu w namespace voting-app
+    cmds:
+      - kubectl port-forward -n voting-app service/backend-service 30001:3000 & 
+      - kubectl port-forward -n voting-app service/frontend-service 30002:80 &
+
+  all:
+    desc: Wykonuje wszystkie zadania (tworzy klaster, buduje obrazy, wczytuje je, wdraża aplikację)
+    deps:
+      - create-cluster
+      - create-namespace
+      - build-backend
+      - build-frontend
+      - load-images
+      - deploy
+
+  cleanup:
+    desc: Usuwa klaster Kind, namespace voting-app i wszystkie zasoby
+    cmds:
+      - kind delete cluster --name voting-cluster
+      - kubectl delete namespace voting-app --ignore-not-found=true
